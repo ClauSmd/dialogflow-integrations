@@ -3,16 +3,17 @@
  * Add your service key to the current folder.
  * Uncomment and fill in these variables.
  */
-// const projectId = 'my-project';
-// const locationId = 'global';
-// const agentId = 'my-agent';
-// const languageCode = 'en'
-// const TELEGRAM_TOKEN='1234567898:ABCdfghTtaD8dfghdfgh45sdf65467M';
-// const SERVER_URL='https://example.com';
 
-const structProtoToJson =
-    require('../../botlib/proto_to_json.js').structProtoToJson;
+// Configura las variables necesarias
+const projectId = 'vitali-olam';              // Tu ID de proyecto en Google Cloud
+const locationId = 'us-central1';             // La región de tu agente, ej: us-central1
+const agentId = 'ac888ef4-2da1-49a9-a881-9439303b3dec'; // Tu ID de agente de Dialogflow CX
+const languageCode = 'es';                    // El idioma, en este caso 'es' para español
+const TELEGRAM_TOKEN = '7943815220:AAGPjBCPFGbMrsI-GsOin8QCvRdI4BBIbT8';  // Token de tu bot de Telegram
+const SERVER_URL = 'https://example.com';     // URL pública de tu servidor (reemplázala con la URL real)
 
+// Requiere librerías necesarias
+const structProtoToJson = require('../../botlib/proto_to_json.js').structProtoToJson;
 const express = require('express');
 const axios = require('axios');
 const bodyParser = require('body-parser');
@@ -24,18 +25,11 @@ const WEBHOOK = SERVER_URL + URI;
 const app = express();
 app.use(bodyParser.json());
 
-// Imports the Google Cloud Some API library
-const {SessionsClient} = require('@google-cloud/dialogflow-cx');
-/**
- * Example for regional endpoint:
- *   const locationId = 'us-central1'
- *   const client = new SessionsClient({apiEndpoint:
- * 'us-central1-dialogflow.googleapis.com'})
- */
-const client = new SessionsClient(
-    {apiEndpoint: locationId + '-dialogflow.googleapis.com'});
+// Importa la librería de Google Cloud Dialogflow CX
+const { SessionsClient } = require('@google-cloud/dialogflow-cx');
+const client = new SessionsClient({ apiEndpoint: `${locationId}-dialogflow.googleapis.com` });
 
-// Converts Telgram request to a detectIntent request.
+// Convierte la solicitud de Telegram a una solicitud de detectIntent
 function telegramToDetectIntent(telegramRequest, sessionPath) {
   const request = {
     session: sessionPath,
@@ -46,96 +40,82 @@ function telegramToDetectIntent(telegramRequest, sessionPath) {
       languageCode,
     }
   };
-
   return request;
 }
 
-// Converts detectIntent responses to Telegram message requests.
+// Convierte las respuestas de detectIntent a mensajes de Telegram
 async function convertToTelegramMessage(responses, chatId) {
   let replies = [];
-
+  
   for (let response of responses.queryResult.responseMessages) {
     let reply;
 
     switch (true) {
-      case response.hasOwnProperty('text'): {
-        reply = {chat_id: chatId, text: response.text.text.join()};
+      case response.hasOwnProperty('text'):
+        reply = { chat_id: chatId, text: response.text.text.join() };
         break;
-      };
-
-      /**
-       * The layout for the custom payload responses can be found in these
-       * sites: Buttons: https://core.telegram.org/bots/api#inlinekeyboardmarkup
-       * Photos: https://core.telegram.org/bots/api#sendphoto
-       * Voice Audios: https://core.telegram.org/bots/api#sendvoice
-       */
-      case response.hasOwnProperty('payload'): {
+      
+      case response.hasOwnProperty('payload'):
         reply = await structProtoToJson(response.payload);
         reply['chat_id'] = chatId;
         break;
-      };
 
       default:
-    };
+        break;
+    }
+
     if (reply) {
       replies.push(reply);
-    };
+    }
   }
 
   return replies;
 }
 
-/**
- * Takes as input a request from Telegram and converts the request to
- * detectIntent request which is used to call the detectIntent() function
- * and finally output the response given by detectIntent().
- */
+// Función para detectar la intención y obtener la respuesta
 async function detectIntentResponse(telegramRequest) {
   const sessionId = telegramRequest.message.chat.id;
-  const sessionPath = client.projectLocationAgentSessionPath(
-      projectId, locationId, agentId, sessionId);
+  const sessionPath = client.projectLocationAgentSessionPath(projectId, locationId, agentId, sessionId);
   console.info(sessionPath);
 
-  request = telegramToDetectIntent(telegramRequest, sessionPath);
+  const request = telegramToDetectIntent(telegramRequest, sessionPath);
   const [response] = await client.detectIntent(request);
 
   return response;
-};
+}
 
+// Configura el webhook de Telegram
 const setup = async () => {
-  const res = await axios.post(`${API_URL}/setWebhook`, {url: WEBHOOK});
+  const res = await axios.post(`${API_URL}/setWebhook`, { url: WEBHOOK });
   console.log(res.data);
 };
 
+// Recibe las solicitudes de Telegram y responde usando Dialogflow
 app.post(URI, async (req, res) => {
   const chatId = req.body.message.chat.id;
   const response = await detectIntentResponse(req.body);
   const requests = await convertToTelegramMessage(response, chatId);
 
-  for (request of requests) {
-    if (request.hasOwnProperty('photo')) {
-      await axios.post(`${API_URL}/sendPhoto`, request).catch(function(error) {
-        console.log(error)
-      })
-    } else if (request.hasOwnProperty('voice')) {
-      await axios.post(`${API_URL}/sendVoice`, request).catch(function(error) {
-        console.log(error)
-      })
-    } else {
-      await axios.post(`${API_URL}/sendMessage`, request).catch(function(error) {
-        console.log(error)
-      })
+  for (let request of requests) {
+    try {
+      if (request.hasOwnProperty('photo')) {
+        await axios.post(`${API_URL}/sendPhoto`, request);
+      } else if (request.hasOwnProperty('voice')) {
+        await axios.post(`${API_URL}/sendVoice`, request);
+      } else {
+        await axios.post(`${API_URL}/sendMessage`, request);
+      }
+    } catch (error) {
+      console.log(error);
     }
   }
 
   return res.send();
 });
 
+// Inicia el servidor
 const listener = app.listen(process.env.PORT, async () => {
-  console.log(
-      'Your Dialogflow integration server is listening on port ' +
-      listener.address().port);
-
+  console.log('Your Dialogflow integration server is listening on port ' + listener.address().port);
   await setup();
 });
 
